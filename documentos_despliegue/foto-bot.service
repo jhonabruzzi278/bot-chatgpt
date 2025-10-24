@@ -1,0 +1,24 @@
+[Unit]
+Description=Foto Bot Telegram OpenAI
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/foto-bot
+Environment=PATH=/home/ubuntu/foto-bot/.venv/bin
+ExecStart=/home/ubuntu/foto-bot/.venv/bin/python /home/ubuntu/foto-bot/bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=foto-bot
+
+# Limites de recursos
+MemoryLimit=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,94 @@
+# Archivos de configuración personal
+.env
+.env.local
+.env.*.local
+*.env
+
+# Credenciales y tokens
+config/local_settings.py
+secrets.py
+credentials.json
+token.json
+
+# Entornos virtuales de Python
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribución / empaquetado
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+logs/
+*.log
+*.log.*
+log/
+
+# Base de datos
+*.db
+*.sqlite
+*.sqlite3
+
+# IDEs y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Archivos del sistema operativo
+Thumbs.db
+Desktop.ini
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Archivos temporales
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Archivos de medios locales (si los hay)
+media/
+uploads/
+
+# Archivos personales del proyecto
+notas_personales.md
+TODO_personal.md
+pruebas_locales/
