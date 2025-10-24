@@ -370,11 +370,6 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ **Error**\n\nNo se pudo reiniciar el chat.\n\n🔄 Intenta nuevamente.",
             get_main_keyboard()
         )
-    if not is_user_authorized(user.id):
-        return
-    
-    reset_history(user.id)
-    await update.message.reply_text("🧹 Contexto borrado. Empecemos de nuevo.", reply_markup=get_main_keyboard())
 
 async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /config para cambiar configuraciones."""
@@ -819,13 +814,6 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"No se pudo enviar respuesta a usuario {user.id} después de varios intentos")
     except Exception as e:
         logger.error(f"Error crítico enviando respuesta a usuario {user.id}: {e}")
-
-    # Añadir respuesta del asistente al historial
-    history.append({"role": "assistant", "content": answer})
-    conversations[user.id] = history
-
-    # Responder al usuario
-    await update.message.reply_text(answer)
 
 def main():
     """Función principal con manejo de errores robusto."""
