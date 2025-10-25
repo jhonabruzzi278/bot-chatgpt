@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Bot de chat con OpenAI (solo texto). Proyecto simplificado.
+Bot de chat con OpenAI con soporte para documentos.
 """
 
 import logging
@@ -14,18 +14,20 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from telegram.constants import ChatAction
 from telegram.error import NetworkError, RetryAfter, TimedOut, BadRequest
 
+# Importar manejador de documentos
+from document_handler import document_handler
+
 from config.settings import (
     ensure_config, TELEGRAM_BOT_TOKEN, LOG_FORMAT, LOG_LEVEL,
     OPENAI_API_KEY, OPENAI_MODEL, SYSTEM_PROMPT, MAX_TOKENS, 
-    TEMPERATURE, MAX_HISTORY_MESSAGES, is_user_authorized
+    TEMPERATURE, MAX_HISTORY_MESSAGES, is_user_authorized, setup_rotating_logger
 )
 
 from openai import OpenAI
 import openai
 
-# Configurar logging
-logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL))
-logger = logging.getLogger("chat-bot")
+# Configurar logging con rotación automática
+logger = setup_rotating_logger("chat-bot", "chat-bot.log")
 
 # Cliente OpenAI
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -36,12 +38,26 @@ conversations: Dict[int, List[dict]] = {}
 # Configuración personalizada por usuario
 user_configs: Dict[int, Dict] = {}
 
+# Modelos válidos de OpenAI (lista centralizada)
+VALID_OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+
 # Modos de respuesta disponibles
 RESPONSE_MODES = {
-    "🤖 Formal": "Responde de manera profesional, formal y estructurada.",
-    "😊 Casual": "Responde de forma amigable, relajada y conversacional.",
-    "🎓 Académico": "Proporciona explicaciones detalladas, precisas y educativas.",
-    "⚡ Conciso": "Responde de forma breve, directa y al punto."
+    "🤖 Formal": "Adopta un tono profesional, corporativo y altamente estructurado. Utiliza lenguaje técnico apropiado, evita contracciones y expresiones coloquiales. Organiza tus respuestas con claridad usando párrafos bien definidos. Mantén objetividad y neutralidad en todo momento. Ideal para correspondencia empresarial, documentos oficiales, presentaciones corporativas y contextos donde se requiere máxima profesionalidad y seriedad.",
+    
+    "😊 Casual": "Comunícate de manera relajada, amigable y natural, como si conversaras con un amigo cercano. Usa un lenguaje sencillo y cercano, puedes incluir emojis ocasionales para expresar emociones. Está bien usar contracciones (ej: 'no es' → 'no'), expresiones coloquiales y un tono más personal. Sé cálido, empático y accesible. Perfecto para conversaciones informales, consejos personales y crear un ambiente confortable.",
+    
+    "🎓 Académico": "Proporciona respuestas exhaustivas, rigurosas y educativas con profundidad académica. Incluye definiciones precisas, contexto histórico cuando sea relevante, múltiples perspectivas del tema, y referencias a conceptos relacionados. Utiliza terminología especializada y técnica apropiada para el campo de estudio. Estructura tus explicaciones de lo general a lo específico. Ideal para estudiantes, investigadores, papers académicos y aprendizaje profundo de temas complejos.",
+    
+    "⚡ Conciso": "Elimina toda información superflua y ve directamente al grano. Máximo 2-3 oraciones por respuesta. Sin introducciones, sin contexto adicional innecesario, sin elaboraciones extensas. Presenta solo los hechos esenciales, datos clave o la respuesta directa a la pregunta. Usa frases cortas y precisas. Perfecto para cuando necesitas respuestas rápidas, consultas urgentes o información específica sin rodeos.",
+    
+    "💼 Ejecutivo": "Estructura tus respuestas como un resumen ejecutivo profesional. Comienza con la conclusión o punto principal más importante. Usa bullets points y numeración para organizar información clave. Enfócate en insights accionables, métricas relevantes, y decisiones estratégicas. Destaca riesgos, oportunidades y recomendaciones concretas. Elimina detalles excesivos y mantén el enfoque en lo que importa para la toma de decisiones. Ideal para reportes de negocio, presentaciones ejecutivas y análisis estratégicos.",
+    
+    "🎨 Creativo": "Expresa ideas de forma imaginativa, original y artística. Usa metáforas vívidas, analogías creativas, lenguaje descriptivo y poético cuando sea apropiado. No temas explorar comparaciones inusuales o perspectivas únicas. Sé expresivo, emotivo y busca formas innovadoras de explicar conceptos. Pinta imágenes mentales con tus palabras. Perfecto para brainstorming, storytelling, contenido creativo, marketing y cuando necesitas inspiración o perspectivas frescas.",
+    
+    "👨‍💻 Técnico": "Proporciona respuestas con máxima precisión técnica y rigor especializado. Incluye detalles de implementación, arquitectura, consideraciones de rendimiento, limitaciones técnicas y mejores prácticas del campo. Usa terminología específica de la industria sin simplificaciones. Menciona versiones de software, especificaciones técnicas, estándares relevantes y posibles edge cases. Ideal para desarrolladores, ingenieros, sysadmins, arquitectos de software y profesionales técnicos que necesitan información detallada y precisa.",
+    
+    "🧒 Simple": "Explica todo como si tu audiencia tuviera 10 años de edad. Usa vocabulario extremadamente simple y cotidiano. Evita completamente jerga técnica, acrónimos sin explicar y conceptos complejos sin descomponer. Utiliza analogías con cosas del día a día que cualquiera pueda entender (juguetes, comida, animales, familia). Divide información compleja en pasos pequeños y digeribles. Sé paciente, claro y asegúrate de que hasta un niño pueda comprender la explicación. Perfecto para principiantes absolutos, aprendizaje básico o explicar temas complicados de forma accesible."
 }
 
 def get_user_config(user_id: int) -> Dict:
@@ -79,7 +95,9 @@ def get_mode_keyboard():
     keyboard = [
         [KeyboardButton("🤖 Formal"), KeyboardButton("😊 Casual")],
         [KeyboardButton("🎓 Académico"), KeyboardButton("⚡ Conciso")],
-        [KeyboardButton("🔙 Volver")]
+        [KeyboardButton("� Ejecutivo"), KeyboardButton("🎨 Creativo")],
+        [KeyboardButton("👨‍💻 Técnico"), KeyboardButton("🧒 Simple")],
+        [KeyboardButton("�🔙 Volver")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
@@ -105,7 +123,8 @@ def get_model_keyboard():
     """Crea el teclado para seleccionar modelo."""
     keyboard = [
         [KeyboardButton("🧠 gpt-4o"), KeyboardButton("⚡ gpt-4o-mini")],
-        [KeyboardButton("🔙 Volver Config")]
+        [KeyboardButton("� gpt-3.5-turbo")],
+        [KeyboardButton("�🔙 Volver Config")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
@@ -129,13 +148,12 @@ def validate_user_config(config: dict) -> tuple[bool, str]:
         if not (0.0 <= config.get("temperature", 0.7) <= 2.0):
             return False, "❌ La temperatura debe estar entre 0.0 y 2.0"
         
-        # Validar modelo
-        valid_models = ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]
-        if config.get("model") not in valid_models:
-            return False, f"❌ Modelo no válido. Usa: {', '.join(valid_models)}"
+        # Validar modelo usando la lista centralizada
+        if config.get("model") not in VALID_OPENAI_MODELS:
+            return False, f"❌ Modelo no válido. Usa: {', '.join(VALID_OPENAI_MODELS)}"
         
         # Validar tokens
-        if not (50 <= config.get("max_tokens", 500) <= 4000):
+        if not (50 <= config.get("max_tokens", 800) <= 4000):
             return False, "❌ Los tokens deben estar entre 50 y 4000"
         
         # Validar modo
@@ -298,10 +316,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 🎭 Cambiar Modo - Estilos de respuesta\n"
             "• ⚙️ Configuración - Ajustes personalizados\n\n"
             "**Modos de respuesta:**\n"
-            "• 🤖 Formal - Profesional y estructurado\n"
+            "• 🤖 Formal - Profesional y corporativo\n"
             "• 😊 Casual - Amigable y conversacional\n"
             "• 🎓 Académico - Detallado y educativo\n"
-            "• ⚡ Conciso - Breve y directo\n\n"
+            "• ⚡ Conciso - Breve y directo\n"
+            "• 💼 Ejecutivo - Resumen ejecutivo\n"
+            "• 🎨 Creativo - Imaginativo y expresivo\n"
+            "• 👨‍💻 Técnico - Especializado y técnico\n"
+            "• 🧒 Simple - Fácil de entender\n\n"
+            "**📄 Soporte de Documentos:**\n"
+            "Envía archivos y te ayudo a analizarlos:\n"
+            "• 📕 PDF - Extrae y analiza texto\n"
+            "• 📄 TXT - Lee archivos de texto\n"
+            "• 📘 Word (.docx, .doc) - Analiza documentos\n"
+            "• 📊 Excel (.xlsx, .xls) - Lee hojas de cálculo\n"
+            "• 📋 CSV - Procesa datos tabulares\n\n"
             "**Comandos de configuración:**\n"
             "• `/config temperatura 0.8` - Cambiar creatividad\n"
             "• `/config modelo gpt-4o` - Cambiar modelo\n"
@@ -310,7 +339,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Modo: {config['mode']}\n"
             f"• Modelo: {config['model']}\n"
             f"• Temperatura: {config['temperature']}\n"
-            f"• Máx. tokens: {config['max_tokens']}\n\n"
+            f"• Máx. tokens: {config['max_tokens']}\n"
+            f"• Máx. historial: {MAX_HISTORY_MESSAGES}\n\n"
             "💡 Usa los botones o escribe directamente."
         )
         await safe_send_message(update, help_text, get_main_keyboard())
@@ -392,7 +422,7 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "`/config tokens 500`\n\n"
                 "**Valores permitidos:**\n"
                 "• Temperatura: 0.0 - 2.0\n"
-                "• Modelo: gpt-4o-mini, gpt-4o\n"
+                f"• Modelo: {', '.join(VALID_OPENAI_MODELS)}\n"
                 "• Tokens: 100 - 4000"
             )
             await safe_send_message(update, config_text, get_main_keyboard())
@@ -428,11 +458,10 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                     
         elif setting == "modelo":
-            valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
-            if value in valid_models:
+            if value in VALID_OPENAI_MODELS:
                 config["model"] = value
                 user_configs[user.id] = config
-                desc = "Más inteligente" if value == "gpt-4o" else "Rápido y económico" if value == "gpt-4o-mini" else "Básico"
+                desc = "Más inteligente" if value == "gpt-4o" else "Rápido y económico" if value == "gpt-4o-mini" else "Básico y económico"
                 await safe_send_message(
                     update,
                     f"✅ **Modelo actualizado**\n\n🧠 **Modelo:** {value}\n📊 **Tipo:** {desc}",
@@ -441,7 +470,7 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await safe_send_message(
                     update,
-                    f"❌ **Modelo inválido**\n\nModelos disponibles:\n• {chr(10).join(valid_models)}\n\n💡 Ejemplo: `/config modelo gpt-4o-mini`",
+                    f"❌ **Modelo inválido**\n\nModelos disponibles:\n• {chr(10).join(VALID_OPENAI_MODELS)}\n\n💡 Ejemplo: `/config modelo gpt-4o-mini`",
                     get_main_keyboard()
                 )
                     
@@ -556,10 +585,14 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"🎭 **Selecciona un modo de respuesta:**\n\n"
             f"**Actual:** {config['mode']}\n\n"
-            "🤖 **Formal** - Profesional y estructurado\n"
-            "😊 **Casual** - Amigable y conversacional\n"
-            "🎓 **Académico** - Detallado y educativo\n"
-            "⚡ **Conciso** - Breve y directo",
+            "🤖 **Formal** - Profesional y corporativo\n"
+            "😊 **Casual** - Amigable como un amigo\n"
+            "🎓 **Académico** - Detallado y técnico\n"
+            "⚡ **Conciso** - Breve y directo\n"
+            "💼 **Ejecutivo** - Resumen ejecutivo\n"
+            "🎨 **Creativo** - Imaginativo y expresivo\n"
+            "👨‍💻 **Técnico** - Especializado y preciso\n"
+            "🧒 **Simple** - Fácil de entender",
             parse_mode='Markdown',
             reply_markup=get_mode_keyboard()
         )
@@ -602,7 +635,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🧠 **Modelo actual:** {config['model']}\n\n"
             "**Selecciona un modelo:**\n\n"
             "🧠 **gpt-4o** - Más inteligente y capaz\n"
-            "⚡ **gpt-4o-mini** - Rápido y económico\n\n"
+            "⚡ **gpt-4o-mini** - Rápido y económico\n"
+            "🔷 **gpt-3.5-turbo** - Básico y económico\n\n"
             "💡 gpt-4o es más capaz pero usa más tokens",
             parse_mode='Markdown',
             reply_markup=get_model_keyboard()
@@ -647,13 +681,13 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     # Opciones de modelo
-    elif text in ["🧠 gpt-4o", "⚡ gpt-4o-mini"]:
+    elif text in ["🧠 gpt-4o", "⚡ gpt-4o-mini", "🔷 gpt-3.5-turbo"]:
         model_value = text.split()[-1]
         config = get_user_config(user.id)
         config["model"] = model_value
         user_configs[user.id] = config
         
-        model_desc = "Más inteligente y capaz" if model_value == "gpt-4o" else "Rápido y económico"
+        model_desc = "Más inteligente y capaz" if model_value == "gpt-4o" else "Rápido y económico" if model_value == "gpt-4o-mini" else "Básico y económico"
         await update.message.reply_text(
             f"✅ **Modelo actualizado**\n\n"
             f"🧠 **Nuevo modelo:** {model_value}\n"
@@ -815,6 +849,98 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error crítico enviando respuesta a usuario {user.id}: {e}")
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja documentos enviados por los usuarios."""
+    user = update.effective_user
+    
+    # Verificar autorización
+    if not is_user_authorized(user.id):
+        await safe_send_message(
+            update, 
+            f"❌ **No autorizado**\n\nTu ID de usuario es: `{user.id}`\n\n👨‍💻 Contacta al administrador."
+        )
+        return
+    
+    try:
+        # Obtener el documento
+        document = update.message.document
+        
+        if not document:
+            return
+        
+        filename = document.file_name
+        file_size_mb = document.file_size / (1024 * 1024)
+        
+        # Verificar si el formato es soportado
+        if not document_handler.is_supported(filename):
+            await safe_send_message(
+                update,
+                f"❌ **Formato no soportado**\n\n"
+                f"📄 Archivo: `{filename}`\n\n"
+                f"**Formatos soportados:**\n{document_handler.get_supported_formats()}\n\n"
+                "💡 Envía un archivo en uno de estos formatos.",
+                get_main_keyboard()
+            )
+            return
+        
+        # Notificar que se está procesando
+        await safe_send_message(
+            update,
+            f"📄 **Procesando documento...**\n\n"
+            f"📎 Archivo: `{filename}`\n"
+            f"📊 Tamaño: {file_size_mb:.2f} MB\n\n"
+            "⏳ Extrayendo contenido..."
+        )
+        
+        # Indicador de procesamiento
+        await update.message.chat.send_action(action=ChatAction.TYPING)
+        
+        # Descargar archivo
+        file = await context.bot.get_file(document.file_id)
+        file_bytes = await file.download_as_bytearray()
+        
+        # Procesar documento
+        success, message, content = await document_handler.process_document(bytes(file_bytes), filename)
+        
+        if not success:
+            await safe_send_message(update, message, get_main_keyboard())
+            return
+        
+        # Documento procesado exitosamente
+        logger.info(f"Documento procesado para usuario {user.id}: {filename} ({len(content)} chars)")
+        
+        # Agregar el contenido al contexto
+        history = get_history(user.id)
+        
+        # Crear mensaje con el contenido del documento
+        doc_message = f"[Usuario envió el documento '{filename}'. Contenido del documento:\n\n{content}\n\n]"
+        history.append({"role": "user", "content": doc_message})
+        
+        # Pedir al usuario qué quiere hacer con el documento
+        prompt = "He procesado tu documento. ¿Qué te gustaría saber sobre él? Puedes pedirme:\n- Resumen del contenido\n- Responder preguntas específicas\n- Extraer información particular\n- Traducir el documento\n- Analizar datos (si es Excel/CSV)"
+        history.append({"role": "assistant", "content": prompt})
+        
+        conversations[user.id] = history
+        
+        await safe_send_message(
+            update,
+            f"✅ **Documento procesado**\n\n"
+            f"📄 {filename}\n"
+            f"📝 {len(content)} caracteres extraídos\n\n"
+            f"{prompt}",
+            get_main_keyboard()
+        )
+        
+    except Exception as e:
+        logger.error(f"Error manejando documento para usuario {user.id}: {e}")
+        await safe_send_message(
+            update,
+            "❌ **Error procesando documento**\n\n"
+            f"Hubo un problema al procesar el archivo.\n\n"
+            f"Detalles: {str(e)[:100]}",
+            get_main_keyboard()
+        )
+
 def main():
     """Función principal con manejo de errores robusto."""
     try:
@@ -836,6 +962,9 @@ def main():
         app.add_handler(CommandHandler("stats", stats_command))
         app.add_handler(CommandHandler("config", config_command))
 
+        # Manejo de documentos
+        app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+        
         # Manejo de botones y chat general
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
         logger.info("✅ Handlers registrados exitosamente")

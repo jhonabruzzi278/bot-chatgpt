@@ -1,5 +1,7 @@
 import os
+import logging
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
@@ -25,9 +27,9 @@ SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", (
 )).strip()
 
 # Configuración del chat
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
-MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "800"))  # Valor por defecto actualizado a 800
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))  # Valor por defecto actualizado a 0.7
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "100"))  # Valor por defecto actualizado a 100
 
 # Control de acceso
 AUTHORIZED_USER_IDS = os.getenv("AUTHORIZED_USER_IDS", "").strip()
@@ -55,3 +57,40 @@ def is_user_authorized(user_id: int) -> bool:
     if not AUTHORIZED_USERS:  # Si no hay restricciones, todos pueden usar
         return True
     return user_id in AUTHORIZED_USERS
+
+def setup_rotating_logger(logger_name: str, log_file: str = "bot.log") -> logging.Logger:
+    """
+    Configura un logger con rotación automática de archivos.
+    
+    Args:
+        logger_name: Nombre del logger
+        log_file: Nombre del archivo de log
+        
+    Returns:
+        Logger configurado con rotación
+    """
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(getattr(logging, LOG_LEVEL))
+    
+    # Evitar duplicar handlers si ya existe
+    if logger.handlers:
+        return logger
+    
+    # Handler con rotación: máximo 10MB por archivo, mantener 5 backups
+    log_path = LOGS_DIR / log_file
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    
+    # Handler para consola
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
